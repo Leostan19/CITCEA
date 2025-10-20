@@ -29,6 +29,27 @@ economic_constraints_DataFrame = pandas.read_excel(folder_data+'client.xlsx', sh
 client_EV = pandas.read_excel(folder_data+'client.xlsx', sheet_name='EV', header=None,
                               index_col=0)  # import EV characteristics defined by the client
 #
+ev_df = pandas.read_excel(folder_data + 'EV_stations.xlsx')
+
+station_cols = [c for c in ev_df.columns if c.startswith('EV station')]
+assert len(station_cols) == 4, f"Expected 4 EV station columns, found {len(station_cols)}"
+T = len(l_t)  # 8760 hours
+ev_df = ev_df.iloc[:T].reset_index(drop=True)
+EV_profiles = {s: ev_df[s].to_numpy(dtype=float) for s in station_cols}
+
+# Editable
+Pmax_station = {s: 22.0 for s in station_cols}   # kW rated power per station
+eta_ch  = {s: 0.95 for s in station_cols}        # charging efficiency
+eta_dis = {s: 0.95 for s in station_cols}        # discharging efficiency
+
+EV_Stations = {
+    "id_list": station_cols,
+    "profile": EV_profiles,
+    "Pmax": Pmax_station,
+    "eta_ch": eta_ch,
+    "eta_dis": eta_dis,
+}
+#
 Grid_client = pandas.read_excel(folder_data + 'client.xlsx', sheet_name='Grid', header=1, index_col=None)  # import Grid client data
 hired_power_periods = pandas.read_excel(folder_data + 'client.xlsx', sheet_name='hired_power Periods', header=1, index_col=None)
 buy_price_periods = pandas.read_excel(folder_data + 'client.xlsx', sheet_name='buy_price Periods', header=1, index_col=None)
@@ -181,8 +202,13 @@ from pre_processing.System import AllInputsClass
 
 AllInputs = AllInputsClass(System, Loads, PV, BESS, Grid,
                            EV, economic_constraints,
-                           Network)
+                           Network, EV_Stations)
 
+print("\n--- Checking AllInputs data ---")
+print("EV station IDs:", AllInputs.EV_Stations["id_list"])
+print("First 5 values for EV station 1:", AllInputs.EV_Stations["profile"]["EV station 1 [kWh]"][:5])
+print("Pmax for station 1:", AllInputs.EV_Stations["Pmax"]["EV station 1 [kWh]"])
+print("--------------------------------\n")
 
 
 

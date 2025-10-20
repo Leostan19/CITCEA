@@ -23,10 +23,6 @@ EV_stations = {
     "eta_dis": eta_dis,
 }
 
-Prices = {
-    "buy":  price_buy,
-    "sell": price_sell,
-}
 
 print(f"Loaded {len(station_cols)} EV stations and price data for {T} hours.")
 

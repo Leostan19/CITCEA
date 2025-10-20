@@ -91,7 +91,7 @@ def t_in_month(name_days, dict_month, l_t, l_month):
 class AllInputsClass:
     def __init__(self, System, Loads, PV, BESS, Grid,
                  EV, economic_constraints,
-                 Network):
+                 Network, EV_Stations=None):
         self.System = System
         self.PV = PV
         self.BESS = BESS
@@ -101,4 +101,5 @@ class AllInputsClass:
         #
         self.Network = Network
         self.Load = Loads
+        self.EV_Stations = EV_Stations
 
