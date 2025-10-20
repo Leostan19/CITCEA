@@ -210,7 +210,7 @@ def save_operation(allResults, AllInputs, save_folder):
     if AllInputs.EV.hay == 1 and AllInputs.EV.immediate0_smart1 == 1: # Flexibility: EV smart charging
         table_EV = dataframe_from_dict_loads(allResults.EV.P, l_Mev, l_t)
     dict_cL = {}
-    dict_cL['Critical load'] = list(AllInputs.System.critical_Load.values())
+    #dict_cL['Critical load'] = list(AllInputs.System.critical_Load.values())
     if AllInputs.EV.hay == 1 and AllInputs.EV.immediate0_smart1 == 0:
         dict_cL['EV immediate'] = list(AllInputs.EV.immediate.values())
     table_cL = pandas.DataFrame(dict_cL, index=l_t)
