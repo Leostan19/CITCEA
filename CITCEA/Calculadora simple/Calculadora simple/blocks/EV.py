@@ -1,138 +1,195 @@
 import pyomo.environ as pyo
 import math
 
+
 def EV_block(model, l_t, l_Mev, l_bus, AllInputs):
     '''
-    EV system.
-    An immediate charging EV is defined as a critical load.
-    A smart charging EV is defined very similar to the power-shiftable load.
+    ==========================================================================
+    EV_block(model, l_t, l_Mev, l_bus, AllInputs)
+    ==========================================================================
+    Defines all EV-related parameters, variables, and constraints.
+    Supports Vehicle-to-Grid (V2G): charging (+) and discharging (−).
 
-    A single EV model is considered, and it can not combine immediate and smart charging.
-    If immediate charging, the total load profile is considered.
-    If smart charging, it can include several loads, where each load is characterized by a single decision variable,
-    which is how should be the profile.
+    MAIN IDEAS:
+      - EVs can both charge (consume power) and discharge (inject to grid)
+      - The net power EV_P = EV_Pch − EV_Pdis replaces old EV_P
+      - All other constraints (power balance, economics) stay valid
+    ==========================================================================
 
-    This is a MILP model.
-    Integer (binary) variables to indicate it is equal to the baseline.
+    Inputs:
+        model        : main Pyomo model
+        l_t          : list of timesteps
+        l_Mev        : list of EV IDs (smart charging ones)
+        l_bus        : list of network bus IDs
+        AllInputs    : full data structure with EV, grid, and system info
 
-    :param model: pyomo ``Block()`` or ``Model()`` in which the BESS system is added
-    :param l_Mev: ``list`` containing all EV subsystems id
-    :param l_t: ``list`` containing all time-steps
-    :param AllInputs: data class
+    Outputs (to the optimization model):
+        EV_Pch[Mev,t]       : EV charging power decision variable [kW]
+        EV_Pdis[Mev,t]      : EV discharging power decision variable [kW]
+        EV_P[Mev,t]         : Expression (net power = charge − discharge)
+        EV_flexibility_cost : cost if deviating from baseline profile [€]
+    ==========================================================================
 
-    Pyomo parameters:
-        - ...
-    Pyomo variables:
-        - ...
-    Pyomo constraints:
-        - ... ESCRIBIR VARIABLES Y PARAMETROS EN FORMATO MATEMATICO, Y AQUÍ PONER LA DESCRIPCIÓN DE LAS RESTRICCIONES Y SUS ECUACIONES
-
-    Block inputs: -
-
-    Block outputs: EV_D (param), EV_P, EV_flexibility_cost
     '''
 
-    ##### Model Sets #####
+    ##### ────────────────────────────── PARAMETERS ────────────────────────────── #####
 
-    # model.t = pyo.Set(initialize=l_t)  # time steps to consider in the optimization (time horizon=365 days)
-    # model.Mev = pyo.Set(initialize=l_Mev)  # EV with smart charging
+    # If there are EVs defined by the user
+    if AllInputs.EV.hay == 1:
+        if AllInputs.EV.immediate0_smart1 == 0:
+            # Immediate charging = fixed load
+            model.EV_D = pyo.Param(
+                model.i_bus, model.t, within=pyo.NonNegativeReals,
+                initialize=AllInputs.Load.Pd_EV_total
+            )
+        else:
+            # Smart charging = flexible (optimizable)
+            # Initialize empty critical load (none, since it's flexible)
+            model.EV_D = pyo.Param(
+                model.i_bus, model.t, within=pyo.NonNegativeReals,
+                initialize={(i_bus, t): 0 for t in l_t for i_bus in l_bus}
+            )
 
+            # Maximum charge power per EV [kW]
+            model.EV_Pmax = pyo.Param(model.Mev,
+                                      initialize=AllInputs.EV.smart.Pmax_evMev, within=pyo.NonNegativeReals)
 
-    ##### Model Parameters #####
+            # NEW: Maximum discharge power per EV [kW]
+            # if not provided, we assume equal to charge power
+            Pdismax_dict = getattr(AllInputs.EV.smart, "Pdismax_evMev", None)
+            if Pdismax_dict is None:
+                Pdismax_dict = AllInputs.EV.smart.Pmax_evMev
+            model.EV_Pdismax = pyo.Param(model.Mev,
+                                         initialize=Pdismax_dict, within=pyo.NonNegativeReals)
 
-    if AllInputs.EV.hay == 1: # if there is EV
-        if AllInputs.EV.immediate0_smart1 == 0:  # immediate charging
-            model.EV_D = pyo.Param(model.i_bus, model.t, within=pyo.NonNegativeReals, initialize=AllInputs.Load.Pd_EV_total)#AllInputs.EV.immediate)  # total critical load power profile of the EVs [kW] (profile built based on probability distributions)
-        else:  # smart charging ~= power-shiftable load
-            model.EV_D = pyo.Param(model.i_bus, model.t, within=pyo.NonNegativeReals, initialize={(i_bus,t): 0 for t in l_t for i_bus in l_bus})  # critical load EV = 0
-            model.EV_Pmax = pyo.Param(model.Mev, initialize=AllInputs.EV.smart.Pmax_evMev, within=pyo.NonNegativeReals)  # maximum charging power of the EV [kW]
-            model.EV_P_station = pyo.Param(initialize=AllInputs.EV.smart.P_estacion, within=pyo.NonNegativeReals)  # maximum power of the charging station [kW]
-            model.EV_E = pyo.Param(model.Mev, initialize=AllInputs.EV.smart.E_evMev, within=pyo.NonNegativeReals)  # total energy charged for the EV [kWh]
-            model.EV_t_availability = pyo.Param(model.Mev, model.t, initialize=AllInputs.EV.smart.K_evMev_t, within=pyo.Binary)  # binary that indicates if the EV can charge in a time-step. 1: yes, 0: no
-            model.EV_Pbaseline = pyo.Param(model.Mev, model.t, initialize=AllInputs.EV.smart.Pbaseline_evMev_t, within=pyo.NonNegativeReals)  # baseline power profile of the EV [kW]
-            model.EV_flexibility_price = pyo.Param(model.Mev, initialize=AllInputs.EV.smart.Cost_evMev, within=pyo.NonNegativeReals)  # price to change the EV profile from the baseline [€]
+            # Station limit (shared converter rating)
+            model.EV_P_station = pyo.Param(
+                initialize=AllInputs.EV.smart.P_estacion, within=pyo.NonNegativeReals)
+
+            # Total required net charged energy per EV [kWh]
+            model.EV_E = pyo.Param(model.Mev,
+                                   initialize=AllInputs.EV.smart.E_evMev, within=pyo.NonNegativeReals)
+
+            # Availability (1 = connected, 0 = not connected)
+            model.EV_t_availability = pyo.Param(model.Mev, model.t,
+                                                initialize=AllInputs.EV.smart.K_evMev_t, within=pyo.Binary)
+
+            # Baseline charging profile (for flexibility comparison)
+            model.EV_Pbaseline = pyo.Param(model.Mev, model.t,
+                                           initialize=AllInputs.EV.smart.Pbaseline_evMev_t,
+                                           within=pyo.NonNegativeReals)
+
+            # Flexibility price (€/EV per deviation)
+            model.EV_flexibility_price = pyo.Param(model.Mev,
+                                                   initialize=AllInputs.EV.smart.Cost_evMev,
+                                                   within=pyo.NonNegativeReals)
+
+            # Charging/discharging efficiencies
+            eta_ch = getattr(AllInputs.EV.smart, "eta_ch", 0.95)
+            eta_dis = getattr(AllInputs.EV.smart, "eta_dis", 0.95)
+            model.EV_eta_ch = pyo.Param(initialize=eta_ch, within=pyo.PercentFraction)
+            model.EV_eta_dis = pyo.Param(initialize=eta_dis, within=pyo.PercentFraction)
+
     else:
-        model.EV_D = pyo.Param(model.i_bus, model.t, within=pyo.NonNegativeReals, initialize={(i_bus,t): 0 for t in l_t for i_bus in l_bus})  # critical load EV = 0
-    model.EV_pos_bus = pyo.Param(model.i_bus, initialize=AllInputs.EV.pos_bus, within=pyo.Binary)  # binary that indicates the bus to which the load is connected --> [id_load,id_bus]=1
+        # No EVs at all
+        model.EV_D = pyo.Param(
+            model.i_bus, model.t, within=pyo.NonNegativeReals,
+            initialize={(i_bus, t): 0 for t in l_t for i_bus in l_bus}
+        )
 
+    # Binary mapping of which bus each EV is connected to
+    model.EV_pos_bus = pyo.Param(
+        model.i_bus, initialize=AllInputs.EV.pos_bus, within=pyo.Binary)
 
-    ##### Model Variables #####
+    ##### ────────────────────────────── VARIABLES ────────────────────────────── #####
 
-    if AllInputs.EV.hay == 1 and AllInputs.EV.immediate0_smart1 == 1:  # if there is EV and it is with smart charging
-        model.EV_P = pyo.Var(model.Mev, model.t, within=pyo.NonNegativeReals)  # EV charging power [kW]
-        model.EV_flexibility_cost = pyo.Var(model.Mev, within=pyo.NonNegativeReals)  # cost of EV flexibility [€]
-        model.EV_is_baseline = pyo.Var(model.Mev, within=pyo.Binary)  # binary that indicates if the power profile of the EV is equal to the baseline. 1: yes, 0: no
+    if AllInputs.EV.hay == 1 and AllInputs.EV.immediate0_smart1 == 1:
+        # Charging and discharging decision variables (kW)
+        model.EV_Pch = pyo.Var(model.Mev, model.t, within=pyo.NonNegativeReals)
+        model.EV_Pdis = pyo.Var(model.Mev, model.t, within=pyo.NonNegativeReals)
+
+        # Net EV power variable (positive = charging, negative = discharging)
+        model.EV_P = pyo.Var(model.Mev, model.t, within=pyo.Reals)
+
+        # Constraint linking charge and discharge to net power
+        def ev_power_balance(m, Mev, t):
+            return m.EV_P[Mev, t] == m.EV_Pch[Mev, t] - m.EV_Pdis[Mev, t]
+
+        model.EV_power_balance = pyo.Constraint(model.Mev, model.t, rule=ev_power_balance)
+
+        # Cost-related variables
+        model.EV_flexibility_cost = pyo.Var(model.Mev, within=pyo.NonNegativeReals)
+        model.EV_is_baseline = pyo.Var(model.Mev, within=pyo.Binary)
+
     else:
-        model.EV_P = pyo.Param(model.Mev, model.t, within=pyo.NonNegativeReals, initialize={(Mev, t): 0 for t in l_t for Mev in l_Mev})
-        model.EV_flexibility_cost = pyo.Param(model.Mev, within=pyo.NonNegativeReals, initialize={Mev: 0 for Mev in l_Mev})
+        # No smart EVs, set constants to zero
+        model.EV_P = pyo.Param(model.Mev, model.t, within=pyo.Reals,
+                               initialize={(Mev, t): 0.0 for Mev in l_Mev for t in l_t})
+        model.EV_flexibility_cost = pyo.Param(model.Mev, within=pyo.NonNegativeReals,
+                                              initialize={Mev: 0.0 for Mev in l_Mev})
 
+    ##### ────────────────────────────── CONSTRAINTS ────────────────────────────── #####
 
-    ##### Model Constraints #####
+    if AllInputs.EV.hay == 1 and AllInputs.EV.immediate0_smart1 == 1:
+        # (1) Power limits
+        def EV_Pch_limit(m, Mev, t):
+            return m.EV_Pch[Mev, t] <= m.EV_t_availability[Mev, t] * m.EV_Pmax[Mev]
 
-    def Constraint_Pmax_Mev(m, Mev, t):
-        '''
-        Constraint: the power profile has to be lower or equal than the maximum charging power of the EV, considering the time availability of the EV
-        :param m: Pyomo optimization model
-        :param Mev: EV index
-        :param t: time-step index
-        :return: expression of the constraint for every t and Mev
-        '''
-        return m.EV_P[Mev, t] <= m.EV_t_availability[Mev, t] * m.EV_Pmax[Mev]
+        def EV_Pdis_limit(m, Mev, t):
+            return m.EV_Pdis[Mev, t] <= m.EV_t_availability[Mev, t] * m.EV_Pdismax[Mev]
 
-    def Constraint_E_Mev(m, Mev):
-        '''
-        Constraint: total energy charged by the EV has to be equal to the energy demand of the EV
-        :param m: Pyomo optimization model
-        :param Mev: EV index
-        :return: expression of the constraint for every Mev
-        '''
-        return sum(m.EV_P[Mev, t] for t in l_t) * m.inc_t == m.EV_E[Mev]
+        model.Constr_EV_Pch_limit = pyo.Constraint(model.Mev, model.t, rule=EV_Pch_limit)
+        model.Constr_EV_Pdis_limit = pyo.Constraint(model.Mev, model.t, rule=EV_Pdis_limit)
 
-    def Constraint_P_station_EV(m, t):
-        '''
-        Constraint: the charging power of all EVs has to be lower or equal than the charging station maximum power
-        :param m: Pyomo optimization model
-        :param t: time-step index
-        :return: expression of the constraint for every t
-        '''
-        return sum(m.EV_P[Mev, t] for Mev in l_Mev) <= m.EV_P_station
+        # (2) Station limit — total power flow cannot exceed station capacity
+        def EV_station_limit(m, t):
+            return sum(m.EV_Pch[Mev, t] + m.EV_Pdis[Mev, t] for Mev in l_Mev) <= m.EV_P_station
 
-    def Constraint_is_baseline_Mev1(m, Mev, t):
-        '''
-        Constraint: first expression to identify if the load profile is equal or different from the baseline.
-        Note: due to solver tolerance, the loads have to be lower than 1 GW.
-        :param m: Pyomo optimization model
-        :param Mev: EV index
-        :param t: time-step index
-        :return: expression of the constraint for every t and Mev
-        '''
-        return -10**6 * (1-m.EV_is_baseline[Mev]) <= m.EV_P[Mev,  t] - m.EV_Pbaseline[Mev, t]
+        model.Constr_EV_station_limit = pyo.Constraint(model.t, rule=EV_station_limit)
 
-    def Constraint_is_baseline_Mev2(m, Mev, t):
-        '''
-        Constraint: second expression to identify if the load profile is equal or different from the baseline.
-        Note: due to solver tolerance, the loads have to be lower than 1 GW.
-        :param m: Pyomo optimization model
-        :param Mev: EV index
-        :param t: time-step index
-        :return: expression of the constraint for every t and Mev
-        '''
-        return m.EV_P[Mev,  t] - m.EV_Pbaseline[Mev, t] <= 10**6 * (1-m.EV_is_baseline[Mev])
+        # (3) Energy balance over horizon
+        # Ensures that, accounting for efficiencies, the net charged energy equals EV_E
+        def EV_energy_rule(m, Mev):
+            return sum(m.EV_eta_ch * m.EV_Pch[Mev, t]
+                       - (1.0 / m.EV_eta_dis) * m.EV_Pdis[Mev, t]
+                       for t in l_t) * m.inc_t == m.EV_E[Mev]
 
-    def Constraint_flexibility_cost_Mev(m, Mev):
-        '''
-        Constraint: the cost of flexibility is the price given if the load profile is different from the baseline,
-        and 0 otherwise
-        :param m: Pyomo optimization model
-        :param Mev: EV index
-        :return: expression of the constraint for every Mev
-        '''
-        return m.EV_flexibility_cost[Mev] == (1-m.EV_is_baseline[Mev]) * m.EV_flexibility_price[Mev]
+        model.Constr_EV_energy = pyo.Constraint(model.Mev, rule=EV_energy_rule)
 
-    if AllInputs.EV.hay == 1 and AllInputs.EV.immediate0_smart1 == 1:  # if there is EV and it is with smart charging
-        model.Constr_Pmax_Mev = pyo.Constraint(model.Mev, model.t, rule=Constraint_Pmax_Mev)
-        model.Constr_E_Mev = pyo.Constraint(model.Mev, rule=Constraint_E_Mev)
-        model.Constr_P_station_EV = pyo.Constraint(model.t, rule=Constraint_P_station_EV)
-        model.Constr_is_baseline_Mev1 = pyo.Constraint(model.Mev, model.t, rule=Constraint_is_baseline_Mev1)
-        model.Constr_is_baseline_Mev2 = pyo.Constraint(model.Mev, model.t, rule=Constraint_is_baseline_Mev2)
-        model.Constr_flexibility_cost_Mev = pyo.Constraint(model.Mev, rule=Constraint_flexibility_cost_Mev)
+        # (4) Baseline comparison constraints (Big-M)
+        BIGM = 1e6
+
+        def EV_is_baseline_1(m, Mev, t):
+            return -BIGM * (1 - m.EV_is_baseline[Mev]) <= (m.EV_Pch[Mev, t] - m.EV_Pdis[Mev, t]) - m.EV_Pbaseline[
+                Mev, t]
+
+        def EV_is_baseline_2(m, Mev, t):
+            return (m.EV_Pch[Mev, t] - m.EV_Pdis[Mev, t]) - m.EV_Pbaseline[Mev, t] <= BIGM * (1 - m.EV_is_baseline[Mev])
+
+        model.Constr_EV_is_baseline_1 = pyo.Constraint(model.Mev, model.t, rule=EV_is_baseline_1)
+        model.Constr_EV_is_baseline_2 = pyo.Constraint(model.Mev, model.t, rule=EV_is_baseline_2)
+
+        # (5) Flexibility cost constraint
+        def EV_flex_cost_rule(m, Mev):
+            return m.EV_flexibility_cost[Mev] == (1 - m.EV_is_baseline[Mev]) * m.EV_flexibility_price[Mev]
+
+        model.Constr_EV_flex_cost = pyo.Constraint(model.Mev, rule=EV_flex_cost_rule)
+
+        model.EV_mode = pyo.Var(model.Mev, model.t, within=pyo.Binary)
+
+        def no_simul_charge(m, Mev, t):
+            return m.EV_Pch[Mev, t] <= m.EV_Pmax[Mev] * m.EV_mode[Mev, t]
+
+        def no_simul_discharge(m, Mev, t):
+            return m.EV_Pdis[Mev, t] <= m.EV_Pdismax[Mev] * (1 - m.EV_mode[Mev, t])
+
+        model.Constr_no_simul_charge = pyo.Constraint(model.Mev, model.t, rule=no_simul_charge)
+        model.Constr_no_simul_discharge = pyo.Constraint(model.Mev, model.t, rule=no_simul_discharge)
+
+        def EV_energy_neutrality(m, Mev):
+            # 0.95: charging efficiency, 0.95: discharging efficiency
+            return sum(m.EV_Pch[Mev, t] * 0.95 for t in m.t) * m.inc_t >= \
+                sum(m.EV_Pdis[Mev, t] / 0.95 for t in m.t) * m.inc_t
+
+        model.Constr_EV_energy_neutrality = pyo.Constraint(model.Mev, rule=EV_energy_neutrality)
+

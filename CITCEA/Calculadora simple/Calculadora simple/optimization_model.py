@@ -16,6 +16,9 @@ def optimization(AllInputs):
     l_Grid = AllInputs.Grid.id_list
     l_Mev = AllInputs.EV.smart.l_Mev
     l_bus = AllInputs.Network.Buses.id_list
+    #EV Stations
+    EV_data = AllInputs.EV_Stations
+    l_EVst = EV_data["id_list"]
 
     # model initialization
     model = pyo.AbstractModel()
@@ -31,6 +34,7 @@ def optimization(AllInputs):
     model.i_PV = pyo.Set(initialize=l_PV)  # models/elements of PV
     model.i_BESS = pyo.Set(initialize=l_BESS)  # models/elements of BESS
     model.i_Grid = pyo.Set(initialize=l_Grid)  #models/elements of Grid
+    model.Mev_st = pyo.Set(initialize=l_EVst)   #EV stations
     #
     model.i_bus = pyo.Set(initialize=l_bus)
 
@@ -50,7 +54,16 @@ def optimization(AllInputs):
     model.max_emissions = pyo.Param(initialize=AllInputs.System.max_emissions)
     model.Grid_renewable_factor = pyo.Param(model.i_Grid, model.t, initialize=AllInputs.Grid.renewable_factor,
                                             within=pyo.NonNegativeReals)  # renewable factor of the energy from the grid ar each time-step [pu]
-
+    #EV Parameters
+    #Pmax
+    model.P_EV_max = pyo.Param(model.Mev_st,
+                               initialize={s: EV_data["Pmax"][s] for s in EV_data["id_list"]})
+    #Eta_Charging
+    model.eta_ch_EV = pyo.Param(model.Mev_st,
+                                initialize={s: EV_data["eta_ch"][s] for s in EV_data["id_list"]})
+    #Eta_Discharging
+    model.eta_dis_EV = pyo.Param(model.Mev_st,
+                                 initialize={s: EV_data["eta_dis"][s] for s in EV_data["id_list"]})
 
     ##### Model Blocks #####
 

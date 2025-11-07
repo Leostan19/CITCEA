@@ -223,7 +223,7 @@ def Grid_block(model, l_t, l_N, l_month, l_PV, AllInputs):
     def Constraint_Grid_P12(m, i_Grid):
         '''
         Constraint: if Spanish tariff different from 2.0TD is applied,
-        the hired power at period 1 has to be lower or equal than at period 2
+        the hired power at period 1 has to be lower or equal than at    period 2
         :param m: Pyomo optimization model
         :return: expression of the constraint
         '''

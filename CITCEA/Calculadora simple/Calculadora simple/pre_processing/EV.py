@@ -130,7 +130,7 @@ def procesa_input_EV(l_t, inc_t, client_EV2):
     h_parked_vehicles = h_parked_vehicles.tolist()
 
     P_max = min(client_EV2.Pmax_battery, client_EV2.Pmax_charging_point)
-    E_fin = 554.2/0.95  # SOC_i*kWh # energy that the vehicle has to have when leaving (40-100 kWh)
+    E_fin = 554.2  # SOC_i*kWh # energy that the vehicle has to have when leaving (40-100 kWh)
     E_ini = 0  # SOC_f*kWh # energy that the vehicle has when arrives
     P_estacion = client_EV2.Pmax_station
 

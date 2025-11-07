@@ -40,6 +40,23 @@ if __name__ == '__main__':
     print('Time: ', format((end - begin) / 60, '.2f'), 'min')
     print()
 
+    EV_smart = AllInputs.EV.smart
+    l_t = AllInputs.System.l_t
+    l_Mev = EV_smart.l_Mev
+
+    # K_evMev_t is a dictionary {(Mev, t): 0/1}
+    K = EV_smart.K_evMev_t
+
+    # count how many timesteps each EV is connected
+    for Mev in l_Mev[:35]:  # show first 10 EVs only
+        connected_hours = sum(K[Mev, t] for t in l_t)
+        print(f"EV {Mev}: connected {connected_hours} hours out of {len(l_t)}")
+
+    # optionally check one EV's connection pattern (first 50 timesteps)
+    sample_Mev = l_Mev[0]
+    availability = [K[sample_Mev, t] for t in l_t[:50]]
+    print(f"\nEV {sample_Mev} first 50 timesteps:\n{availability}")
+
     # define the solver to use: gurobi, mindtpy, highs, scip, ...
     solver = 'gurobi'
 

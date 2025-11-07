@@ -101,23 +101,39 @@ class GridResultsClass:
 
 class EVResultsClass:
     '''
-    Class that extracts and stores the smart charging EV results from the instance
+    Class that extracts and stores the smart charging EV results (including V2G)
+    from the solved Pyomo instance.
     '''
-    def __init__(self, instance, l_t, AllInputs):  # instance=instance.EV
+    def __init__(self, instance, l_t, AllInputs):
         '''
-        Class that extracts and stores the smart charging EV results from the instance
-        :param instance: pyomo solved Grid model (instance.EV)
-        :param l_t: ``list`` containing all time-steps
-        :param AllInputs: data class which contains all inputs
+        :param instance: solved Pyomo model instance
+        :param l_t: list of all time steps
+        :param AllInputs: data class with all inputs
         '''
         l_Mev = AllInputs.EV.smart.l_Mev
+
         if AllInputs.EV.hay == 1 and AllInputs.EV.immediate0_smart1 == 1:
-            self.P = instance.EV_P.get_values()
-            self.flexibility_cost = instance.EV_flexibility_cost.get_values()
-            self.is_baseline = instance.EV_is_baseline.get_values()
+            # --- existing variables ---
+            self.P = instance.EV_P.get_values() if hasattr(instance, "EV_P") else {}
+            self.flexibility_cost = instance.EV_flexibility_cost.get_values() if hasattr(instance, "EV_flexibility_cost") else {}
+            self.is_baseline = instance.EV_is_baseline.get_values() if hasattr(instance, "EV_is_baseline") else {}
+
+            # --- new bidirectional variables ---
+            # Charging power
+            self.P_ch = instance.EV_Pch.get_values() if hasattr(instance, "EV_Pch") else {}
+            # Discharging power
+            self.P_dis = instance.EV_Pdis.get_values() if hasattr(instance, "EV_Pdis") else {}
+            # State of charge
+            self.SOC = instance.EV_SOC.get_values() if hasattr(instance, "EV_SOC") else {}
+
         else:
-            self.P = {(Mev, t): 0 for t in l_t for Mev in l_Mev}
+            # No EVs or immediate charging
+            self.P = {(Mev, t): 0 for Mev in l_Mev for t in l_t}
+            self.P_ch = {(Mev, t): 0 for Mev in l_Mev for t in l_t}
+            self.P_dis = {(Mev, t): 0 for Mev in l_Mev for t in l_t}
+            self.SOC = {(Mev, t): 0 for Mev in l_Mev for t in l_t}
             self.flexibility_cost = {Mev: 0 for Mev in l_Mev}
+            self.is_baseline = {Mev: 0 for Mev in l_Mev}
 
 
 class NetworkResultsClass:

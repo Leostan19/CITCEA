@@ -4,7 +4,7 @@ import pandas
 ####################   Read input data from excel (get_inputs_form_excel)   ####################
 
 folder_data = 'CSV/DATA/'
-l_t = list(range(24*365))
+l_t = list(range(1200))
 bisiesto = 0
 inc_t = 1  # time-step magnitude [h]
 #
@@ -204,11 +204,6 @@ AllInputs = AllInputsClass(System, Loads, PV, BESS, Grid,
                            EV, economic_constraints,
                            Network, EV_Stations)
 
-print("\n--- Checking AllInputs data ---")
-print("EV station IDs:", AllInputs.EV_Stations["id_list"])
-print("First 5 values for EV station 1:", AllInputs.EV_Stations["profile"]["EV station 1 [kWh]"][:5])
-print("Pmax for station 1:", AllInputs.EV_Stations["Pmax"]["EV station 1 [kWh]"])
-print("--------------------------------\n")
 
 
 
