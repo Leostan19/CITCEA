@@ -1,0 +1,29 @@
+Libraries required:
+    pyomo (version 6.4.4 or later)
+    openpyxl (version 3.1.5)
+    requests (version 2.31.0 or later)
+    pandas (version 2.0.3)
+    numpy (version 1.24.0)
+
+
+COMMENTS on the model:
+- Deterministic model. All inputs are known and all years in the project lifetime are exactly the same
+- External grid connection with Spanish market.
+    Tariff 2.0TD cannot have penalisations.
+    Options to define grid costs: fix/constant for all hours, by each tariff period, based on downloaded spot market annual data, from hourly profile uploaded.
+    Hired power can be optimised or fixed as given by each tariff period.
+    Injection to the grid is optimised based on client willingness and that the total PV installation is lower than the limit (here we can put a limit
+    of 100 kW for bureaucratic issues or a high enough value to not consider it).
+- Multiple loads can be defined given their annual power profile (including EV with immediate charging).
+     A single EV can also be built based on daily profile probability distributions, and can be considered as immediate charging or smart charging. (<-- to improve)
+- BESS calendar aging through SOCmax(t) and cycle aging through an adjustable degradation cost (€/kWh) for charging and discharging
+- Load not supplied defined for each bus, and it has a fixed cost
+- Operational and replacement costs are actualized --> same formula as NPV: sum(cost/(1+disc_rate)**y for y in range(y_ini,L_prj,y_step)), with disc_rate=0
+- ROI and payback constraints are currently disabled, making the model LP (without flexibility requests)!!!
+- (internal) System grid approaches:
+    Economic dispatch.
+    DC-OPF. Single voltage level, as no transformers are modelled. Grid indicators (losses or other costs) not implemented
+    AC-OPF not implemented
+- Separate systems can be considered as connected to different buses
+- If more than one external grid connection, PV limit to inject is supposed as the sum of PV for all buses and injection decision will affect all external grid connections
+- Converters are not directly implemented
